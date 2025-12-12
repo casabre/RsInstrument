@@ -10,6 +10,9 @@ from RsInstrument.mcp import (
     instrument_query_scpi,
     instrument_reset,
     instrument_write_scpi,
+    main,
+    run,
+    safe_tool,
 )
 
 
@@ -213,5 +216,126 @@ def test_instrument_operations_default_timeout(mock_rs_instrument_class):
 
     instrument_reset("test")
     assert mock_inst.opc_timeout == 5000
+
+
+def test_safe_tool_wraps_exceptions():
+    """Ensure safe_tool converts exceptions to standardized error strings."""
+
+    @safe_tool
+    def unstable():
+        raise RuntimeError("unexpected boom")
+
+    assert unstable() == "Error: unexpected boom"
+
+
+def test_create_fastmcp_server_requires_fastmcp():
+    """create_fastmcp_server should demand FastMCP installation."""
+    with patch("RsInstrument.mcp.MCP_INSTALLED", False):
+        with pytest.raises(ImportError):
+            create_fastmcp_server()
+
+
+@patch("RsInstrument.mcp.FastMCP")
+def test_create_fastmcp_server_registers_custom_tools(mock_fastmcp_class):
+    """Custom tools supplied to create_fastmcp_server are registered."""
+    mock_fastmcp = MagicMock()
+    mock_fastmcp_class.return_value = mock_fastmcp
+    mock_tool_decorator = MagicMock()
+    mock_fastmcp.tool.return_value = mock_tool_decorator
+    mock_fastmcp.custom_route.return_value = lambda fn: fn
+
+    custom_callable = MagicMock()
+    result = create_fastmcp_server(
+        tools=[("Custom", "desc", custom_callable)], health_endpoint="/ready"
+    )
+
+    assert result == mock_fastmcp
+    mock_fastmcp_class.assert_called_once()
+    mock_fastmcp.custom_route.assert_called_once_with("/ready", methods=["GET"])
+    mock_fastmcp.tool.assert_any_call(name="Custom", description="desc")
+    assert mock_tool_decorator.call_count == 5  # four built-ins + custom tool
+    mock_tool_decorator.assert_any_call(custom_callable)
+
+
+def test_run_invokes_fastmcp_run():
+    """run() should create the server and trigger FastMCP.run()."""
+    mock_mcp = MagicMock()
+    with patch("RsInstrument.mcp.create_fastmcp_server", return_value=mock_mcp) as mock_create:
+        extra_tool = ("Extra", "desc", MagicMock())
+        run(
+            "arg",
+            transport="sse",
+            mount_path="/path",
+            tools=[extra_tool],
+            health_endpoint="/live",
+            host="0.0.0.0",
+            port=9000,
+        )
+
+    mock_create.assert_called_once_with(
+        "arg",
+        tools=[extra_tool],
+        health_endpoint="/live",
+        host="0.0.0.0",
+        port=9000,
+    )
+    mock_mcp.run.assert_called_once_with(transport="sse", mount_path="/path")
+
+
+@patch("RsInstrument.mcp.run")
+@patch("RsInstrument.mcp.logging.basicConfig")
+def test_main_invokes_run_with_cli_args(mock_basic_config, mock_run):
+    """main() should parse CLI args and invoke run() with them."""
+    argv = [
+        "--transport",
+        "sse",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "1234",
+        "--mount-path",
+        "/mcp",
+        "--health-endpoint",
+        "/ping",
+        "-vv",
+    ]
+
+    main(argv)
+
+    mock_basic_config.assert_called_once()
+    mock_run.assert_called_once_with(
+        transport="sse",
+        host="0.0.0.0",
+        port=1234,
+        mount_path="/mcp",
+        health_endpoint="/ping",
+    )
+
+
+def test_main_handles_exception_and_exits():
+    """main() should surface non-KeyboardInterrupt errors via SystemExit."""
+    with patch("RsInstrument.mcp.run", side_effect=RuntimeError("boom")), patch(
+        "RsInstrument.mcp.logger"
+    ) as mock_logger:
+        with pytest.raises(SystemExit) as excinfo:
+            main([])
+
+    assert excinfo.value.code == 1
+    mock_logger.error.assert_called_once()
+    mock_logger.warning.assert_called_once_with(
+        "Hint: Rerun with '--verbose' to show exception traceback."
+    )
+
+
+def test_main_handles_keyboard_interrupt():
+    """KeyboardInterrupt is converted to SystemExit with hint."""
+    with patch("RsInstrument.mcp.run", side_effect=KeyboardInterrupt), patch(
+        "RsInstrument.mcp.logger"
+    ) as mock_logger:
+        with pytest.raises(SystemExit) as excinfo:
+            main([])
+
+    assert excinfo.value.code == 1
+    mock_logger.warning.assert_called_once_with("Aborted by user")
 
 
