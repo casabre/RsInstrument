@@ -11,18 +11,12 @@ readme = {file = "README.rst", content-type = "text/x-rst"}
 keywords = ["RsInstrument", "VISA", "RohdeSchwarz"]
 authors = [{name = "Rohde & Schwarz GmbH & Co. KG"}]
 maintainers = [{name = "Rohde & Schwarz GmbH & Co. KG"}]
-	
+
 requires-python = ">= 3.8"
 dependencies = [
 		"pyvisa>=1.13.0",
 		"typing-extensions>=4.0.0"
 	]
-
-[project.optional-dependencies]
-mcp = ["mcp"]
-
-[project.scripts]
-RsInstrument-mcp = "RsInstrument.mcp:main"
 
 classifiers = [
 	  # How mature is this project? Common values are
@@ -42,7 +36,13 @@ classifiers = [
 	  "Programming Language :: Python :: 3.12",
 	  "Programming Language :: Python :: 3.13",
 	]
-	
+
+[project.optional-dependencies]
+mcp = ["mcp"]
+
+[project.scripts]
+RsInstrument-mcp = "RsInstrument.mcp:main"
+
 [tool.setuptools.package-dir]
 RsInstrument = "RsInstrument"
 
